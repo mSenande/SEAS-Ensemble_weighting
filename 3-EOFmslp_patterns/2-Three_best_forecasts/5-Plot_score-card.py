@@ -94,7 +94,7 @@ var_names = ['t2m (IP)', 't2m (CI)', 'tp (IP)', 'tp (CI)', 'msl']#, 'z-500hPa', 
 
 # Some predefined options to plot each score
 score_options = {'bs': [np.linspace(0.,0.5,11), plt.colormaps['YlGn'], 3, 'max', 'Brier Score (BS)'],
-                 'corr': [np.linspace(-1.,1.,11), plt.colormaps['RdYlBu_r'], 1, 'both', 'Spearmans Rank Correlation (stippling where significance below 95%)'],
+                 'corr': [np.linspace(-1.,1.,11), plt.colormaps['RdYlBu_r'], 1, 'both', 'Spearmans Rank Correlation'],
                  'roc': [np.linspace(0.,1.,11), plt.colormaps['BrBG'], 3, 'both', 'Area under Relative Operating Characteristic (ROC) curve'],
                  'rocss': [np.linspace(-0.5,0.5,9), plt.colormaps['BrBG'], 3, 'both', 'Relative Operating Characteristic Skill Score (ROCSS)'],
                  'rps': [np.linspace(0.3,0.5,11), plt.colormaps['YlGn_r'], 1, 'max', 'Ranked Probability Score (RPS)'],
@@ -223,6 +223,16 @@ for label in full_name:
 #%%
 print("5.2 Score-cards")
 
+# Directory creation
+PLOTSDIR = f'./plots/scorecards'
+# Check if the directory exists
+if not os.path.exists(PLOTSDIR):
+    # If it doesn't exist, create it
+    try:
+        os.makedirs(PLOTSDIR)
+    except FileExistsError:
+        pass
+
 # Prepare strings for titles
 locale.setlocale(locale.LC_ALL, 'en_GB')
 if aggr=='1m':
@@ -236,7 +246,7 @@ elif aggr=='3m':
 else:
     raise BaseException(f'Unexpected aggregation {aggr}')
 tit_line1 = 'Surface variables - '+tit_line2+f'\n{score_options[score][4]}'
-figname = f'./data/plots/Score-card_{score}_{"".join(validmonths)}_{aggr}.png'
+figname = f'{PLOTSDIR}/Score-card_{score}_{"".join(validmonths)}_{aggr}.png'
 
 # Create figure
 fig = plt.figure(figsize=(10,8))
@@ -296,5 +306,5 @@ if n_terciles>1:
 else:
     df = df.set_axis(var_names, axis=1)
 df = df.set_axis(pd.MultiIndex.from_product([[label for label in full_name],[init for init in initialization]]), axis=0)
-csvname = f'./plots/Score-card_{score}_{"".join(validmonths)}_{aggr}.csv'
+csvname = f'{PLOTSDIR}/Score-card_{score}_{"".join(validmonths)}_{aggr}.csv'
 df.to_csv(csvname)

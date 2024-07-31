@@ -28,6 +28,7 @@ if len(sys.argv) > 2:
     startmonth = int(sys.argv[3])
     aggr = str(sys.argv[4])
     fcmonth = int(sys.argv[5])
+    region = str(sys.argv[6])
 # If no variables were introduced, ask for them
 else:
     # Which model institution
@@ -68,6 +69,9 @@ else:
         answ = input("Resultados para el trimestre [ NDJ , DJF , JFM , FMA , MAM , AMJ , MJJ , JJA , JAS , ASO , SON , OND ]: ")
         endmonth = np.where(np.array(['NDJ', 'DJF','JFM','FMA','MAM','AMJ','MJJ','JJA','JAS','ASO','SON','OND']) == answ)[0][0]+1
         fcmonth = (endmonth-startmonth)+1 if (endmonth-startmonth)>=0 else (endmonth-startmonth)+13
+
+    # Region selected for plots
+    region = input("Selecciona qué región representar [ Iberia , MedCOF ]: ")
 
 # Dictionary to link full system names and simplier names
 full_name = {'ECMWF-System 4': ['ecmwf','4'],
@@ -137,6 +141,12 @@ score_options = {'bs': [np.linspace(0.,0.5,11), plt.colormaps['YlGn'], 3, 'max',
                  'rpss': [np.linspace(-0.5,0.5,11), plt.colormaps['BrBG'], 1, 'both', 'Ranked Probability Skill Score (RPSS)'],
                 }
 
+# Region definition
+if region=='Iberia':
+    box_limits = [-30, 5, 25, 50] # [West, East, South, North]
+elif region=='MedCOF':
+    box_limits = [-30, 50, 14, 55] # [West, East, South, North]
+
 # Change titles font size
 plt.rc('axes', titlesize=20)
 
@@ -183,9 +193,9 @@ thiscorrpval = corr_pval.sel(forecastMonth=fcmonth)
 # For each var
 for var in thiscorr.data_vars:
     # Create figure
-    fig = plt.figure(figsize=(9,8))
+    fig = plt.figure(figsize=(10,7))
     ax = fig.add_subplot(projection=ccrs.PlateCarree())
-    ax.set_extent([-30, 5, 25, 50], crs=ccrs.PlateCarree())
+    ax.set_extent(box_limits, crs=ccrs.PlateCarree())
     ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=0.5)
     ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=2.)
     ax.gridlines(draw_labels=True)
@@ -209,7 +219,7 @@ for var in thiscorr.data_vars:
     ax.contourf(thiscorrpval[var].lon,thiscorrpval[var].lat,corrpvalvalues,levels=[0.05,np.inf],hatches=['...',None],colors='none')
  
     # Save figure
-    figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/{hcst_bname}.{aggr}.{"".join(validmonths)}.{var}.corr.png'
+    figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/{hcst_bname}.{region}.{aggr}.{"".join(validmonths)}.{var}.corr.png'
     fig.savefig(figname,dpi=600,bbox_inches='tight')    
 
 #%% [markdown]
@@ -235,17 +245,17 @@ thisroc = roc.sel(forecastMonth=fcmonth)
 # For each variable
 for var in thisroc.data_vars:
     # Create figure
-    fig = plt.figure(figsize=(20,6))
+    fig = plt.figure(figsize=(20,5))
     gs = fig.add_gridspec(1,3)
     # For each quantile
     for icat in thisroc.category.values:
         # Create subplot
         ax = fig.add_subplot(gs[0,icat],projection=ccrs.PlateCarree())
-        ax.set_extent([-30, 5, 25, 50], crs=ccrs.PlateCarree())
+        ax.set_extent(box_limits, crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=0.5)
         ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=2.)
-        ax.gridlines(draw_labels=True)
-
+        gl = ax.gridlines(draw_labels=True)
+        gl.ylabels_right = False
         # Check if data values matrices need to be transposed
         avalues = thisroc.sel(category=icat)[var].values
         if avalues.T.shape == (thisroc.sel(category=icat)[var].lat.size, thisroc.sel(category=icat)[var].lon.size):
@@ -262,7 +272,7 @@ for var in thisroc.data_vars:
     fig.suptitle(tit_line1 + f' {VARNAMES[var]}\n' + tit_line2 ,fontsize=12)
     cbar_ax = fig.add_axes([0.07, 0.07, 0.9, 0.02])
     cb = fig.colorbar(cs, cax=cbar_ax, orientation='horizontal',label='ROC')
-    figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/{hcst_bname}.{aggr}.{"".join(validmonths)}.{var}.roc.png'
+    figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/{hcst_bname}.{region}.{aggr}.{"".join(validmonths)}.{var}.roc.png'
     fig.savefig(figname,dpi=600,bbox_inches='tight')    
 
 #%% [markdown]
@@ -288,9 +298,9 @@ thisrpss = rpss.sel(forecastMonth=fcmonth)
 # For each variable
 for var in thisrpss.data_vars:
     # Create figure
-    fig = plt.figure(figsize=(9,8))
+    fig = plt.figure(figsize=(10,7))
     ax = fig.add_subplot(projection=ccrs.PlateCarree())
-    ax.set_extent([-30, 5, 25, 50], crs=ccrs.PlateCarree())
+    ax.set_extent(box_limits, crs=ccrs.PlateCarree())
     ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=0.5)
     ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=2.)
     ax.gridlines(draw_labels=True)
@@ -311,6 +321,6 @@ for var in thisrpss.data_vars:
     cb = fig.colorbar(cs, cax=cbar_ax, orientation='horizontal',label='RPSS')
 
     # Save figure
-    figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/{hcst_bname}.{aggr}.{"".join(validmonths)}.{var}.rpss.png'
+    figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/{hcst_bname}.{region}.{aggr}.{"".join(validmonths)}.{var}.rpss.png'
     fig.savefig(figname,dpi=600,bbox_inches='tight')    
 

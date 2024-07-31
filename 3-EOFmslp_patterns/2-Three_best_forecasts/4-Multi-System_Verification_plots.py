@@ -28,6 +28,7 @@ if len(sys.argv) > 2:
     aggr = str(sys.argv[2])
     fcmonth = int(sys.argv[3])
     score = str(sys.argv[4])
+    region = str(sys.argv[5])
 # If no variables were introduced, ask for them
 else:
     # Which start month
@@ -49,6 +50,9 @@ else:
     # Verification score
     score = input("Usar el siguiente score [ bs , corr , roc , rocss , rps , rpss ]: ")
 
+    # Region selected for plots
+    region = input("Selecciona qué región representar [ Iberia , MedCOF ]: ")
+
 # Dictionary to link full system names and simplier names
 full_name = {#'ECMWF-System 4': ['ecmwf','4'],
              #'ECMWF-SEAS5': ['ecmwf', '5'],
@@ -63,8 +67,8 @@ full_name = {#'ECMWF-System 4': ['ecmwf','4'],
              #'Met Office-System 15': ['ukmo', '15'],
              #'Met Office-GloSea6': ['ukmo', '600'],
              #'Met Office-GloSea6.1': ['ukmo', '601'],
-             #'Met Office-GloSea6.2': ['ukmo', '602'],
-             'Met Office-GloSea6.3': ['ukmo', '603'],
+             'Met Office-GloSea6.2': ['ukmo', '602'],
+             #'Met Office-GloSea6.3': ['ukmo', '603'],
              #'DWD-GCFS2.0': ['dwd', '2'],
              'DWD-GCFS2.1': ['dwd', '21'],
              #'CMCC-SPSv3.0': ['cmcc', '3'],
@@ -99,6 +103,12 @@ score_options = {'bs': [np.linspace(0.,0.5,11), plt.colormaps['YlGn'], 3, 'max',
                  'rps': [np.linspace(0.3,0.5,11), plt.colormaps['YlGn_r'], 1, 'max', 'Ranked Probability Score (RPS)'],
                  'rpss': [np.linspace(-0.5,0.5,11), plt.colormaps['BrBG'], 1, 'both', 'Ranked Probability Skill Score (RPSS)'],
                 }
+
+# Region definition
+if region=='Iberia':
+    box_limits = [-30, 5, 25, 50] # [West, East, South, North]
+elif region=='MedCOF':
+    box_limits = [-30, 50, 14, 55] # [West, East, South, North]
 
 # Change titles font size
 plt.rc('axes', titlesize=20)
@@ -158,10 +168,14 @@ for var in VARNAMES:
 
             # Create subplot (This indicates grid position of subplot: m-4*(m//4),m//4)
             ax = fig.add_subplot(gs[m-4*(m//4),m//4],projection=ccrs.PlateCarree())
-            ax.set_extent([-30, 5, 25, 50], crs=ccrs.PlateCarree())
+            ax.set_extent(box_limits, crs=ccrs.PlateCarree())
             ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=0.5)
             ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=2.)
-            ax.gridlines(draw_labels=True)
+            gl = ax.gridlines(draw_labels=True)
+            if m//4==0:
+                gl.ylabels_right = False
+            else:
+                gl.ylabels_left = False
 
             # Select quantile (if score is splitted into quantiles)
             if score_options[score][2]>1:
@@ -199,10 +213,10 @@ for var in VARNAMES:
         # Add title
         if score_options[score][2]==3:
             fig.suptitle(f'{score_options[score][4]} \n{VARNAMES[var]}' + f' ({CATNAMES[icat]})\n' + tit_line2, fontsize=16)
-            figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/All_models_stmonth{config["start_month"]:02d}_hindcast{config["hcstarty"]}-{config["hcendy"]}_monthly.{aggr}.{"".join(validmonths)}.{var}.{score}{str(icat)}.png'
+            figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/All_models_stmonth{config["start_month"]:02d}_hindcast{config["hcstarty"]}-{config["hcendy"]}_monthly.{region}.{aggr}.{"".join(validmonths)}.{var}.{score}{str(icat)}.png'
         else:
             fig.suptitle(f'{score_options[score][4]} \n{VARNAMES[var]}\n' + tit_line2, fontsize=16)
-            figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/All_models_stmonth{config["start_month"]:02d}_hindcast{config["hcstarty"]}-{config["hcendy"]}_monthly.{aggr}.{"".join(validmonths)}.{var}.{score}.png'
+            figname = f'{NEWPLOTSDIR}/stmonth{config["start_month"]:02d}/All_models_stmonth{config["start_month"]:02d}_hindcast{config["hcstarty"]}-{config["hcendy"]}_monthly.{region}.{aggr}.{"".join(validmonths)}.{var}.{score}.png'
         # Controlling subplot distances
         plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1, hspace=0.3, wspace=0.07)
         # Save figure

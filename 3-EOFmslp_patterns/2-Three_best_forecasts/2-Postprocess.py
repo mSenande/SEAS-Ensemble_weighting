@@ -2,7 +2,9 @@
 # # 2. Compute deterministic and probabilistic scores
 
 # This script is used to compute different verification scores 
-# for monthly seasonal forescasts of surface variables.
+# for monthly seasonal forescasts of surface variables, previously applying a ensemble weighting technique.
+#
+# The ensemble weighting technique is based on the 4 main varability patterns, whose values were predicted in 1-PCs_forecast.py script.
 # 
 # The computed scores are: Spearman's rank correlation, area under Relative Operating Characteristic (ROC) curve, 
 # Relative Operating Characteristic Skill Score (ROCSS), Ranked Probability Score (RPS), Ranked Probability Skill Score (RPSS) and Brier Score (BS).
@@ -18,8 +20,6 @@ from dotenv import load_dotenv
 import xarray as xr
 import pandas as pd
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
 import xskillscore as xs
 from dateutil.relativedelta import relativedelta
 import warnings
@@ -103,7 +103,7 @@ config = dict(
 )
 
 # Directory selection
-load_dotenv() # Data is saved in a path defined in file .env
+load_dotenv() # Data is read from a path defined in file .env
 DATADIR = os.getenv('DATA_DIR')
 # Base name for hindcast
 hcst_bname = '{origin}_s{system}_stmonth{start_month:02d}_hindcast{hcstarty}-{hcendy}_monthly'.format(**config)
@@ -122,15 +122,15 @@ elif not os.path.exists(hcst_fname):
     print('No se descargaron aún los datos de este modelo y sistema')
     sys.exit()
 
-MODESDATADIR = os.getenv('MODES_DIR')
-MODESDIR = MODESDATADIR + '/modes'
 # Directory selection
+MODESDATADIR = os.getenv('MODES_DIR')
+MODESDIR = MODESDATADIR + '/modes'  # Directory where hindcast variability patterns files are located
 POSTDIR = os.getenv('POST_DIR')
-NEWSCOREDIR = POSTDIR + '/scores'
-NEWMODESDIR = POSTDIR + '/modes'
-NEWPLOTSDIR = f'./plots/stmonth{config["start_month"]:02d}'
+NEWMODESDIR = POSTDIR + '/modes' # Directory where variability patterns forecasts are located
+NEWSCOREDIR = POSTDIR + '/scores' # Directory where new skill scores will be saved 
+NEWPLOTSDIR = f'./plots/stmonth{config["start_month"]:02d}' # Directory where new verification plots will be saved 
 # Directory creation
-for directory in [NEWMODESDIR, NEWSCOREDIR, NEWPLOTSDIR]:
+for directory in [NEWSCOREDIR, NEWPLOTSDIR]:
     # Check if the directory exists
     if not os.path.exists(directory):
         # If it doesn't exist, create it
@@ -139,6 +139,21 @@ for directory in [NEWMODESDIR, NEWSCOREDIR, NEWPLOTSDIR]:
         except FileExistsError:
             pass
 
+        
+# %% [markdown]
+# ## 2.1 Ensemble weighting
+
+# We chose the best variability pattern forecast (among different models) for each valid month / season.
+#
+# Then we weight the ensemble members of each model according to the distance of their variability pattern values with the variability pattern forecast
+#
+# We would have four weighting functions (one for each variability pattern considered), 
+# so we finally need to compute a weighted average of these four weighting functions with the explained variance of each pattern as the weights
+
+#%%
+print("2.1 Ensemble weighting")
+
+
 # File name for hindcast
 hcpcs_fname = f'{MODESDIR}/{hcst_bname}.1m.PCs.nc'
 hcpcs_3m_fname = f'{MODESDIR}/{hcst_bname}.3m.PCs.nc'
@@ -146,54 +161,84 @@ hcpcs_3m_fname = f'{MODESDIR}/{hcst_bname}.3m.PCs.nc'
 hcpcs = xr.open_dataset(hcpcs_fname)
 hcpcs_3m = xr.open_dataset(hcpcs_3m_fname)
 
-# Reading modes forecast data from file
+# Reading variability patterns forecast data from file
 forepcs = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth:02d}.1m.nc')
 forepcs_3m = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth:02d}.3m.nc')
 
+# For 1m aggregation
 l_anom=list()
+# For each forecastMonth
 for this_fcmonth in forepcs.forecastMonth.values:
     # Select forecast values
     thisfore = forepcs.sel(forecastMonth=this_fcmonth)
 
+    # If forecastMonth=2 (leadtime=1), we have 2 additional forecasts available that can have better skill for the same valid month
     if this_fcmonth==2:
+        # This is the variability pattern forecast of forecastMonth=2 (leadtime=1)
+        # We will use this variable to save all the best forecasts
         thisfore_prev0 = thisfore.swap_dims({"start_date": "valid_time"})
+        # This is the variability pattern forecast of forecastMonth=3 (leadtime=2)
+        # Since the valid month must be the same, we have to change the startmonth
         startmonth_prev1 = startmonth-1 if startmonth-1>0 else startmonth-1+12
         forepcs_prev1 = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth_prev1:02d}.1m.nc')
         thisfore_prev1 = forepcs_prev1.sel(forecastMonth=this_fcmonth+1).swap_dims({"start_date": "valid_time"})
+        # This is the variability pattern forecast of forecastMonth=4 (leadtime=3)
+        # Since the valid month must be the same, we have to change the startmonth
         startmonth_prev2 = startmonth-2 if startmonth-2>0 else startmonth-2+12
         forepcs_prev2 = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth_prev2:02d}.1m.nc')
         thisfore_prev2 = forepcs_prev2.sel(forecastMonth=this_fcmonth+2).swap_dims({"start_date": "valid_time"})
+        # For each variability pattern / mode:
         for m in thisfore.mode.values:
+            # We check if the variability pattern forecast skill of forecastMonth=4 (leadtime=3) is greater than that of forecastMonth=3 (leadtime=2) and forecastMonth=2 (leadtime=1)
             if (thisfore_prev2.sel(mode=m).rpss>thisfore_prev0.sel(mode=m).rpss) & (thisfore_prev2.sel(mode=m).rpss>thisfore_prev1.sel(mode=m).rpss):
+                # If so, we select the values of this forecast
+                # We have to do this in a loop around all the years and try/except commands, because for the first year we may not have the forecastMonth=4 (leadtime=3) forecast 
                 for t in thisfore.valid_time.values:
                     try:
                         thisfore_prev0.loc[dict(valid_time=t,mode=m)] = thisfore_prev2.sel(valid_time=t,mode=m)
                     except:
                         pass
+                # We change also the corresponding rpss value
                 thisfore_prev0.loc[dict(mode=m)].rpss.values = thisfore_prev2.sel(mode=m).rpss.values
+            # We check if the variability pattern forecast skill of forecastMonth=3 (leadtime=2) is greater than that of forecastMonth=4 (leadtime=3) and forecastMonth=2 (leadtime=1)
             elif (thisfore_prev1.sel(mode=m).rpss>thisfore_prev0.sel(mode=m).rpss) & (thisfore_prev1.sel(mode=m).rpss>thisfore_prev2.sel(mode=m).rpss):
+                # If so, we select the values of this forecast
+                # We have to do this in a loop around all the years and try/except commands, because for the first year we may not have the forecastMonth=3 (leadtime=2) forecast 
                 for t in thisfore.valid_time.values:
                     try:
                         thisfore_prev0.loc[dict(valid_time=t,mode=m)] = thisfore_prev1.sel(valid_time=t,mode=m)
                     except:
                         pass
+                # We change also the corresponding rpss value
                 thisfore_prev0.loc[dict(mode=m)].rpss.values = thisfore_prev1.sel(mode=m).rpss.values
+        # We save the best-forecasts values in the thisfore variable
         thisfore.pseudo_pcs.values = thisfore_prev0.pseudo_pcs.values
         thisfore.rpss.values = thisfore_prev0.rpss.values
 
+    # If forecastMonth=3 (leadtime=2), we have 1 additional forecasts available that can have better skill for the same valid month
     if this_fcmonth==3:
+        # This is the variability pattern forecast of forecastMonth=3 (leadtime=2)
+        # We will use this variable to save all the best forecasts
         thisfore_prev0 = thisfore.swap_dims({"start_date": "valid_time"})
+        # This is the variability pattern forecast of forecastMonth=4 (leadtime=3)
+        # Since the valid month must be the same, we have to change the startmonth
         startmonth_prev1 = startmonth-1 if startmonth-1>0 else startmonth-1+12
         forepcs_prev1 = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth_prev1:02d}.1m.nc')
         thisfore_prev1 = forepcs_prev1.sel(forecastMonth=this_fcmonth+1).swap_dims({"start_date": "valid_time"})
+        # For each variability pattern / mode:
         for m in thisfore.mode.values:
+            # We check if the variability pattern forecast skill of forecastMonth=4 (leadtime=3) is greater than that of forecastMonth=3 (leadtime=2)
             if (thisfore_prev1.sel(mode=m).rpss>thisfore_prev0.sel(mode=m).rpss):
+                # If so, we select the values of this forecast
+                # We have to do this in a loop around all the years and try/except commands, because for the first year we may not have the forecastMonth=4 (leadtime=3) forecast 
                 for t in thisfore.valid_time.values:
                     try:
                         thisfore_prev0.loc[dict(valid_time=t,mode=m)] = thisfore_prev1.sel(valid_time=t,mode=m)
                     except:
                         pass
+                # We change also the corresponding rpss value
                 thisfore_prev0.loc[dict(mode=m)].rpss.values = thisfore_prev1.sel(mode=m).rpss.values
+        # We save the best-forecasts values in the thisfore variable
         thisfore.pseudo_pcs.values = thisfore_prev0.pseudo_pcs.values
         thisfore.rpss.values = thisfore_prev0.rpss.values
 
@@ -206,56 +251,80 @@ for this_fcmonth in forepcs.forecastMonth.values:
 # Concat along forecastMonth
 hcpcs_anom=xr.concat(l_anom,dim='forecastMonth')
 
+# For 3m aggregation
 l_anom=list()
+# For each forecastMonth
 for this_fcmonth in forepcs_3m.forecastMonth.values:
     # Select forecast values
     thisfore = forepcs_3m.sel(forecastMonth=this_fcmonth)
 
+    # If forecastMonth=4 (leadtime=1), we have 2 additional forecasts available that can have better skill for the same valid month
     if this_fcmonth==4:
+        # This is the variability pattern forecast of forecastMonth=4 (leadtime=1)
+        # We will use this variable to save all the best forecasts
         thisfore_prev0 = thisfore.swap_dims({"start_date": "valid_time"})
+        # This is the variability pattern forecast of forecastMonth=5 (leadtime=2)
+        # Since the valid month must be the same, we have to change the startmonth
         startmonth_prev1 = startmonth-1 if startmonth-1>0 else startmonth-1+12
         forepcs_prev1 = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth_prev1:02d}.3m.nc')
         thisfore_prev1 = forepcs_prev1.sel(forecastMonth=this_fcmonth+1).swap_dims({"start_date": "valid_time"})
+        # This is the variability pattern forecast of forecastMonth=6 (leadtime=3)
+        # Since the valid month must be the same, we have to change the startmonth
         startmonth_prev2 = startmonth-2 if startmonth-2>0 else startmonth-2+12
         forepcs_prev2 = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth_prev2:02d}.3m.nc')
         thisfore_prev2 = forepcs_prev2.sel(forecastMonth=this_fcmonth+2).swap_dims({"start_date": "valid_time"})
+        # For each variability pattern / mode:
         for m in thisfore.mode.values:
+            # We check if the variability pattern forecast skill of forecastMonth=6 (leadtime=3) is greater than that of forecastMonth=5 (leadtime=2) and forecastMonth=4 (leadtime=1)
             if (thisfore_prev2.sel(mode=m).rpss>thisfore_prev0.sel(mode=m).rpss) & (thisfore_prev2.sel(mode=m).rpss>thisfore_prev1.sel(mode=m).rpss):
+                # If so, we select the values of this forecast
+                # We have to do this in a loop around all the years and try/except commands, because for the first year we may not have the forecastMonth=6 (leadtime=3) forecast 
                 for t in thisfore.valid_time.values:
                     try:
                         thisfore_prev0.pseudo_pcs.loc[dict(valid_time=t,mode=m)] = thisfore_prev2.pseudo_pcs.loc[dict(valid_time=t,mode=m)].values
                     except:
                         pass
+                # We change also the corresponding rpss value
                 thisfore_prev0.rpss.loc[dict(mode=m)].values = thisfore_prev2.rpss.loc[dict(mode=m)].values
+            # We check if the variability pattern forecast skill of forecastMonth=5 (leadtime=2) is greater than that of forecastMonth=6 (leadtime=3) and forecastMonth=4 (leadtime=1)
             elif (thisfore_prev1.sel(mode=m).rpss>thisfore_prev0.sel(mode=m).rpss) & (thisfore_prev1.sel(mode=m).rpss>thisfore_prev2.sel(mode=m).rpss):
+                # If so, we select the values of this forecast
+                # We have to do this in a loop around all the years and try/except commands, because for the first year we may not have the forecastMonth=6 (leadtime=3) forecast 
                 for t in thisfore.valid_time.values:
                     try:
                         thisfore_prev0.pseudo_pcs.loc[dict(valid_time=t,mode=m)] = thisfore_prev1.pseudo_pcs.loc[dict(valid_time=t,mode=m)].values
                     except:
                         pass
+                # We change also the corresponding rpss value
                 thisfore_prev0.rpss.loc[dict(mode=m)] = thisfore_prev1.rpss.loc[dict(mode=m)].values
+        # We save the best-forecasts values in the thisfore variable
         thisfore.pseudo_pcs.values = thisfore_prev0.pseudo_pcs.values
         thisfore.rpss.values = thisfore_prev0.rpss.values
 
+    # If forecastMonth=5 (leadtime=2), we have 1 additional forecast available that can have better skill for the same valid month
     if this_fcmonth==5:
+        # This is the variability pattern forecast of forecastMonth=5 (leadtime=2)
+        # We will use this variable to save all the best forecasts
         thisfore_prev0 = thisfore.swap_dims({"start_date": "valid_time"})
+        # This is the variability pattern forecast of forecastMonth=6 (leadtime=3)
+        # Since the valid month must be the same, we have to change the startmonth
         startmonth_prev1 = startmonth-1 if startmonth-1>0 else startmonth-1+12
         forepcs_prev1 = xr.open_dataset(f'{NEWMODESDIR}/PCs_best_forecasts_stmonth{startmonth_prev1:02d}.3m.nc')
         thisfore_prev1 = forepcs_prev1.sel(forecastMonth=this_fcmonth+1).swap_dims({"start_date": "valid_time"})
+        # For each variability pattern / mode:
         for m in thisfore.mode.values:
+            # We check if the variability pattern forecast skill of forecastMonth=6 (leadtime=3) is greater than that of forecastMonth=5 (leadtime=2)
             if (thisfore_prev1.sel(mode=m).rpss>thisfore_prev0.sel(mode=m).rpss):
                 for t in thisfore.valid_time.values:
                     try:
                         thisfore_prev0.pseudo_pcs.loc[dict(valid_time=t,mode=m)] = thisfore_prev1.pseudo_pcs.loc[dict(valid_time=t,mode=m)].values
                     except:
                         pass
+                # We change also the corresponding rpss value
                 thisfore_prev0.rpss.loc[dict(mode=m)] = thisfore_prev1.rpss.loc[dict(mode=m)].values
+        # We save the best-forecasts values in the thisfore variable
         thisfore.pseudo_pcs.values = thisfore_prev0.pseudo_pcs.values
         thisfore.rpss.values = thisfore_prev0.rpss.values
-
-    # thisfore = xr.where(thisfore>=0.5,1.,thisfore)
-    # thisfore = xr.where(thisfore<=-0.5,-1.,thisfore)
-    # thisfore = xr.where((thisfore<0.5) | (thisfore>-0.5),0.,thisfore)
 
     # Select hindcast values
     thishcst = hcpcs_3m.sel(forecastMonth=this_fcmonth)
@@ -266,84 +335,71 @@ for this_fcmonth in forepcs_3m.forecastMonth.values:
 # Concat along forecastMonth
 hcpcs_3m_anom=xr.concat(l_anom,dim='forecastMonth')
 
+# Variances for 1m aggregation
+# We create an array (4x12) with all the percentages of explained variance associated with each variability pattern for each month
 eof_variances = xr.DataArray(np.zeros([4,12]),coords={'mode':[0,1,2,3],'month':range(1,13)})
+# For each valid month
 for validmonth in range(1,13):
+    # Explained variance percentages are stored in csv files
     variances = pd.read_csv(f'{MODESDIR}/ERA5_VAR_{validmonth:02d}.csv')
     eof_variances.loc[dict(month=validmonth)]=variances['VAR']
+# We convert the month coordinate into a forecastMonth coordinate
 forecastmonths = eof_variances.month-startmonth+1
 forecastmonths = xr.where(forecastmonths<=0,forecastmonths+12,forecastmonths)
 eof_variances = eof_variances.assign_coords(forecastMonth= forecastmonths)
 eof_variances = eof_variances.swap_dims({"month": "forecastMonth"}).drop('month')
+# We sort the values by the forecastMonth coordinate, and delate the excess values (forecastMonth>6 and forecastMonth<2)
 eof_variances = eof_variances.sortby('forecastMonth')
 eof_variances = eof_variances.where(eof_variances.forecastMonth.isin(hcpcs.forecastMonth.values),drop=True)
 
+# Variances for 3m aggregation
+# We create an array (4x12) with all the percentages of explained variance associated with each variability pattern for each season
 eof_variances_3m = xr.DataArray(np.zeros([4,12]),coords={'mode':[0,1,2,3],'month':range(1,13)})
 vm = 1
+# For each valid season
 for validmonth in ["NDJ", "DJF", "JFM", "FMA", "MAM", "AMJ", "MJJ", "JJA", "JAS", "ASO", "SON", "OND"]:
-    #df = pd.read_csv(filename, index_col=None, header=0)
+    # Explained variance percentages are stored in csv files
     variances = pd.read_csv(f'{MODESDIR}/ERA5_VAR_{validmonth}.csv')
     eof_variances_3m.loc[dict(month=vm)]=variances['VAR']
     vm+=1
+# We convert the month coordinate into a forecastMonth coordinate
 forecastmonths = eof_variances_3m.month-startmonth+1
 forecastmonths = xr.where(forecastmonths<=0,forecastmonths+12,forecastmonths)
 eof_variances_3m = eof_variances_3m.assign_coords(forecastMonth= forecastmonths)
 eof_variances_3m = eof_variances_3m.swap_dims({"month": "forecastMonth"}).drop('month')
+# We sort the values by the forecastMonth coordinate, and delate the excess values (forecastMonth>6 and forecastMonth<4)
 eof_variances_3m = eof_variances_3m.sortby('forecastMonth')
 eof_variances_3m = eof_variances_3m.where(eof_variances_3m.forecastMonth.isin(hcpcs_3m.forecastMonth.values),drop=True)
 
-
-weights = 1./(1.+hcpcs_anom['pseudo_pcs'].weighted(eof_variances).mean(dim='mode'))#.mean(dim='mode')
-weights_3m = 1./(1.+hcpcs_3m_anom['pseudo_pcs'].weighted(eof_variances_3m).mean(dim='mode'))#.mean(dim='mode')
-weights_norm = (weights/weights.sum(dim='number'))-0.00001
-weights_3m_norm = (weights_3m/weights_3m.sum(dim='number'))-0.00001
+# We calculate the weighting funtions
+weights = 1./(1.+hcpcs_anom['pseudo_pcs'].weighted(eof_variances).mean(dim='mode'))
+weights_3m = 1./(1.+hcpcs_3m_anom['pseudo_pcs'].weighted(eof_variances_3m).mean(dim='mode'))
+# We normalize the weighting funtions
+weights_norm = (weights/weights.sum(dim='number'))
+weights_3m_norm = (weights_3m/weights_3m.sum(dim='number'))
+# We standarize the weighting funtions
 weights_off = (weights-weights.min(dim='number'))/(weights.max(dim='number')-weights.min(dim='number'))
 weights_3m_off = (weights_3m-weights_3m.min(dim='number'))/(weights_3m.max(dim='number')-weights_3m.min(dim='number'))
-weights_scal = weights_off/weights_off.sum(dim='number')-0.00001
-weights_3m_scal = weights_3m_off/weights_3m_off.sum(dim='number')-0.00001
-
+weights_scal = weights_off/weights_off.sum(dim='number')
+weights_3m_scal = weights_3m_off/weights_3m_off.sum(dim='number')
+# Control for non-negative values
 weights_norm = xr.where(weights_norm<0.,0.,weights_norm)
 weights_3m_norm = xr.where(weights_3m_norm<0.,0.,weights_3m_norm)
 weights_scal = xr.where(weights_scal<0.,0.,weights_scal)
 weights_3m_scal = xr.where(weights_3m_scal<0.,0.,weights_3m_scal)
-
+# Control for non-nan values
 weights_norm = weights_norm.fillna(1./weights_norm.number.size)
 weights_3m_norm = weights_3m_norm.fillna(1./weights_3m_norm.number.size)
 weights_scal = weights_scal.fillna(1./weights_scal.number.size)
 weights_3m_scal = weights_3m_scal.fillna(1./weights_3m_scal.number.size)
 
-# cmap = matplotlib.colormaps['jet']
-# colors = cmap(np.linspace(0, 1, weights_3m_norm.start_date.size))
-# # Take colors at regular intervals spanning the colormap.
-# fig = plt.figure(figsize=(9,8))
-# for y in range(weights_3m_norm.start_date.size):
-#     weights_as_pcs = weights_3m_norm.sel(forecastMonth=4).isel(start_date=y).sortby(hcpcs_3m['pseudo_pcs'].sel(forecastMonth=4,mode=0).isel(start_date=y))
-#     pcs_as_pcs = hcpcs_3m['pseudo_pcs'].sel(forecastMonth=4,mode=0).isel(start_date=y).sortby(hcpcs_3m['pseudo_pcs'].sel(forecastMonth=4,mode=0).isel(start_date=y))
-#     plt.plot(pcs_as_pcs,weights_as_pcs,color=colors[y],label=str(pd.to_datetime(weights_3m_scal.start_date[y].values).year))
-# plt.title('Weights of ensemble members')
-# plt.xlabel('NAO')
-# plt.ylabel('Weights')
-# plt.legend()
-# #fig.savefig(NEWPLOTSDIR+'/'+hcst_bname+'_weights_norm.png',dpi=600,bbox_inches='tight')  
-
-# fig = plt.figure(figsize=(9,8))
-# for y in range(weights_3m_scal.start_date.size):
-#     weights_as_pcs = weights_3m_scal.sel(forecastMonth=4).isel(start_date=y).sortby(hcpcs_3m['pseudo_pcs'].sel(forecastMonth=4,mode=0).isel(start_date=y))
-#     pcs_as_pcs = hcpcs_3m['pseudo_pcs'].sel(forecastMonth=4,mode=0).isel(start_date=y).sortby(hcpcs_3m['pseudo_pcs'].sel(forecastMonth=4,mode=0).isel(start_date=y))
-#     plt.plot(pcs_as_pcs,weights_as_pcs,color=colors[y],label=str(pd.to_datetime(weights_3m_scal.start_date[y].values).year))
-# plt.title('Weights of ensemble members')
-# plt.xlabel('NAO')
-# plt.ylabel('Weights')
-# plt.legend()
-# #fig.savefig(NEWPLOTSDIR+'/'+hcst_bname+'_weights_scal.png',dpi=600,bbox_inches='tight')  
-
-
 # %% [markdown]
-# ## 2.1 Hindcast anomalies
+# ## 2.2 Hindcast anomalies
 
 # We calculate the monthly and 3-months anomalies for the hindcast data.
 
 #%%
-print("2.1 Hindcast anomalies")
+print("2.2 Hindcast anomalies")
 
 # For the re-shaping of time coordinates in xarray.Dataset we need to select the right one 
 #  -> burst mode ensembles (e.g. ECMWF SEAS5) use "time". This is the default option in this notebook
@@ -385,13 +441,13 @@ anom = anom.where(anom.forecastMonth.isin(weights_scal.forecastMonth.values),dro
 anom_3m = anom_3m.where(anom_3m.forecastMonth.isin(weights_3m_scal.forecastMonth.values),drop=True)
 
 # %% [markdown]
-# ## 2.2 Probabilities for tercile categories
+# ## 2.3 Probabilities for tercile categories
 
 # Here we get the probabilities for tercile categories of the hindcast data, 
 # by counting the number of ensemble members found in each tercile.
 
 # %% 
-print("2.2 Probabilities for tercile categories")
+print("2.3 Probabilities for tercile categories")
 
 # We define a function to calculate the boundaries of forecast categories defined by quantiles
 def get_thresh(icat,quantiles,xrds,dims=['number','start_date']):
@@ -443,26 +499,21 @@ probs_1m = probs_1m.where(probs_1m.forecastMonth.isin(weights_scal.forecastMonth
 probs_3m = probs_3m.where(probs_3m.forecastMonth.isin(weights_3m_scal.forecastMonth.values),drop=True)
 
 # %% [markdown]
-# ## 2.3 Read observation data
+# ## 2.4 Read observation data
 
 # We read the monthly ERA5 data and obtain 3-months means.
 
 #%%
-print("2.3 Read observation data")  
+print("2.4 Read observation data")  
 
 if 'total_precipitation' in config['list_vars']:
     # Total precipitation in ERA5 grib must be read separately because of time dimension
     era5_1deg_notp = xr.open_dataset(obs_fname, engine='cfgrib', backend_kwargs={'filter_by_keys': {'step': 0}})
-    era5_1deg_tp = xr.open_dataset(obs_fname, engine='cfgrib', backend_kwargs={'filter_by_keys': {'shortName': 'mtpr'}})
+    era5_1deg_tp = xr.open_dataset(obs_fname, engine='cfgrib', backend_kwargs={'filter_by_keys': {'shortName': 'tp'}})
     # We assign the same time dimension
     era5_1deg_tp = era5_1deg_tp.assign_coords(time=era5_1deg_notp.time.values)
     # We assign the same name as in hindcast
-    era5_1deg_tp = era5_1deg_tp.rename({'mtpr':'tprate'})
-    # We assign the same units as in hindcast
-    era5_1deg_tp.tprate.values = era5_1deg_tp.tprate.values*0.001
-    era5_1deg_tp.attrs["units"] = 'm s**-1'
-    era5_1deg_tp.tprate.attrs["units"] = 'm s**-1'
-    era5_1deg_tp.tprate.attrs["GRIB_units"] = 'm s**-1'
+    era5_1deg_tp = era5_1deg_tp.rename({'tp':'tprate'})
     # We merge the two datasets
     era5_1deg = xr.merge([era5_1deg_notp,era5_1deg_tp],compat='override')
     del era5_1deg_notp, era5_1deg_tp
@@ -491,14 +542,14 @@ era5_1deg_3m = era5_1deg_3m.drop('forecastMonth')
 
 
 # %% [markdown]
-# ## 2.4 Compute deterministic scores
+# ## 2.5 Compute deterministic scores
 
 # Here we calculate the Spearman's rank correlation and their p-values. 
 # 
 # This score is based on the ensemble mean, not on the probabilities for each tercile.
 
 # %% 
-print("2.4 Compute deterministic scores")
+print("2.5 Compute deterministic scores")
 
 # Loop over aggregations
 for aggr in ['1m','3m']:
@@ -542,13 +593,13 @@ for aggr in ['1m','3m']:
     corr_pval.to_netcdf(f'{NEWSCOREDIR}/{hcst_bname}.{aggr}.corr_pval.nc')
 
 # %% [markdown]
-# ## 2.5 Compute probabilistic scores for tercile categories
+# ## 2.6 Compute probabilistic scores for tercile categories
 
 # Here we calculate the probabilistic scores: area under Relative Operating Characteristic (ROC) curve, 
 # Relative Operating Characteristic Skill Score (ROCSS), Ranked Probability Score (RPS), Ranked Probability Skill Score (RPSS) and Brier Score (BS). 
 
 # %% 
-print("2.5 Compute probabilistic scores for tercile categories")
+print("2.6 Compute probabilistic scores for tercile categories")
 
 # Loop over aggregations
 for aggr in ['1m','3m']:

@@ -172,7 +172,10 @@ for var in VARNAMES:
             ax.add_feature(cfeature.BORDERS, edgecolor='black', linewidth=0.5)
             ax.add_feature(cfeature.COASTLINE, edgecolor='black', linewidth=2.)
             gl = ax.gridlines(draw_labels=True)
-            gl.ylabels_right = False
+            if m//4==0:
+                gl.ylabels_right = False
+            else:
+                gl.ylabels_left = False
 
             # Select quantile (if score is splitted into quantiles)
             if score_options[score][2]>1:

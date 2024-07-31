@@ -71,8 +71,6 @@ lts=3
 
 load_dotenv() # Data is saved in a path defined in file .env
 CSVDIR = os.getenv('DEFAULT_VER')
-POSTDIR = os.getenv('POST_DIR')
-NEWSCOREDIR = POSTDIR + '/scores'
 
 # Common labels to be used in plot titles
 VARNAMES = {
@@ -82,24 +80,29 @@ VARNAMES = {
 }
 
 if aggr=='1m':
-    var_seasons = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    var_seasons = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 elif aggr=='3m': 
     var_seasons = ["JFM", "FMA", "MAM", "AMJ", "MJJ", "JJA", "JAS", "ASO", "SON", "OND", "NDJ", "DJF"]
 
 # Some predefined options to plot each score
 score_options = {'bs': [np.linspace(-0.3,0.3,10), plt.colormaps['bwr_r'], 3, 'max', 'Brier Score (BS)'],
                  'corr': [np.linspace(-0.5,0.5,10), plt.colormaps['bwr_r'], 1, 'both', 'Spearmans Rank Correlation'],
-                 'roc': [np.linspace(-0.5,0.5,10), plt.colormaps['bwr_r'], 3, 'both', 'Area under Relative Operating Characteristic (ROC) curve'],
-                 'rocss': [np.linspace(-0.5,0.5,10), plt.colormaps['bwr_r'], 3, 'both', 'Relative Operating Characteristic Skill Score (ROCSS)'],
+                 'roc': [np.linspace(-0.3,0.3,10), plt.colormaps['bwr_r'], 3, 'both', 'Area under Relative Operating Characteristic (ROC) curve'],
+                 'rocss': [np.linspace(-0.3,0.3,10), plt.colormaps['bwr_r'], 3, 'both', 'Relative Operating Characteristic Skill Score (ROCSS)'],
                  'rps': [np.linspace(-0.3,0.3,10), plt.colormaps['bwr_r'], 1, 'max', 'Ranked Probability Score (RPS)'],
                  'rpss': [np.linspace(-0.3,0.3,10), plt.colormaps['bwr_r'], 1, 'both', 'Ranked Probability Skill Score (RPSS)'],
                 }
 
-new_csv = f'./plots/Score-card_{score}_{aggr}_{var}.csv'
+new_csv = f'./plots/scorecards/Score-card_{score}_{aggr}_{var}.csv'
 old_csv = f'{CSVDIR}/Score-card_{score}_{aggr}_{var}.csv'
 
-df_new = pd.read_csv(new_csv)
-df_old = pd.read_csv(old_csv)
+if score_options[score][2]>1:
+    df_new = pd.read_csv(new_csv, header=[0,1])
+    df_old = pd.read_csv(old_csv, header=[0,1])
+
+else:
+    df_new = pd.read_csv(new_csv)
+    df_old = pd.read_csv(old_csv)
 
 DATA = df_new.iloc[:,2:] - df_old.iloc[:,2:]
 
@@ -110,12 +113,22 @@ n_seasons = len(var_seasons)
 n_terciles = score_options[score][2]
 
 # %% [markdown]
-# ## 6.1 Score-cards
+# ## 7.1 Score-cards
 
 # Then we represent the results.
 
 #%%
-print("6.1 Score-cards")
+print("7.1 Score-cards")
+
+# Directory creation
+PLOTSDIR = f'./plots/scorecards'
+# Check if the directory exists
+if not os.path.exists(PLOTSDIR):
+    # If it doesn't exist, create it
+    try:
+        os.makedirs(PLOTSDIR)
+    except FileExistsError:
+        pass
 
 # Prepare strings for titles
 locale.setlocale(locale.LC_ALL, 'en_GB')
@@ -130,7 +143,7 @@ locale.setlocale(locale.LC_ALL, 'en_GB')
 # else:
 #     raise BaseException(f'Unexpected aggregation {aggr}')
 tit_line1 = f'{VARNAMES[var]}'+f'\n Difference in {score_options[score][4]}'
-figname = f'./plots/Dif_score-card_{score}_{aggr}_{var}.png'
+figname = f'{PLOTSDIR}/Dif_score-card_{score}_{aggr}_{var}.png'
 
 # Create figure
 fig = plt.figure(figsize=(17,8))

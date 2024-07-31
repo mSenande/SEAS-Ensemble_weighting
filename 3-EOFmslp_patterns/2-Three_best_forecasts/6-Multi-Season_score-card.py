@@ -80,7 +80,7 @@ VARNAMES = {
 }
 
 if aggr=='1m':
-    var_seasons = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    var_seasons = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 elif aggr=='3m': 
     var_seasons = ["JFM", "FMA", "MAM", "AMJ", "MJJ", "JJA", "JAS", "ASO", "SON", "OND", "NDJ", "DJF"]
 
@@ -208,6 +208,16 @@ for label in full_name:
 #%%
 print("6.2 Score-cards")
 
+# Directory creation
+PLOTSDIR = f'./plots/scorecards'
+# Check if the directory exists
+if not os.path.exists(PLOTSDIR):
+    # If it doesn't exist, create it
+    try:
+        os.makedirs(PLOTSDIR)
+    except FileExistsError:
+        pass
+
 # Prepare strings for titles
 locale.setlocale(locale.LC_ALL, 'en_GB')
 # if aggr=='1m':
@@ -221,7 +231,7 @@ locale.setlocale(locale.LC_ALL, 'en_GB')
 # else:
 #     raise BaseException(f'Unexpected aggregation {aggr}')
 tit_line1 = f'{VARNAMES[var]}'+f'\n{score_options[score][4]}'
-figname = f'./plots/Score-card_{score}_{aggr}_{var}.png'
+figname = f'{PLOTSDIR}/Score-card_{score}_{aggr}_{var}.png'
 
 # Create figure
 fig = plt.figure(figsize=(17,8))
@@ -281,5 +291,5 @@ if n_terciles>1:
 else:
     df = df.set_axis(var_seasons, axis=1)
 df = df.set_axis(pd.MultiIndex.from_product([[label for label in full_name],['lead3', 'lead2', 'lead1']]), axis=0)
-csvname = f'./plots/Score-card_{score}_{aggr}_{var}.csv'
+csvname = f'{PLOTSDIR}/Score-card_{score}_{aggr}_{var}.csv'
 df.to_csv(csvname)
